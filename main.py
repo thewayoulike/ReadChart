@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import yfinance as yf
+from PIL import Image
+import cv2
+import numpy as np
 import plotly.graph_objects as go
 
 # -----------------------------
@@ -32,41 +34,34 @@ def fetch_psx_market_watch():
         return pd.DataFrame(), str(e)
 
 # -----------------------------
-# Fetch Historical Stock Data
+# Candlestick & SMA from Market Watch
 # -----------------------------
-def fetch_stock_data(symbol, period="6mo", interval="1d"):
-    try:
-        df = yf.download(symbol + ".PK", period=period, interval=interval)
-        if df.empty:
-            return pd.DataFrame(), f"No data found for {symbol}"
-        df.reset_index(inplace=True)
-        return df, None
-    except Exception as e:
-        return pd.DataFrame(), str(e)
-
-# -----------------------------
-# Compute SMA
-# -----------------------------
-def compute_sma(df, window=20):
-    df[f"SMA_{window}"] = df['Close'].rolling(window=window).mean()
+def compute_sma(df, window=5):
+    df['Close'] = pd.to_numeric(df['Close'].str.replace(',',''), errors='coerce')
+    df['SMA'] = df['Close'].rolling(window=window).mean()
     return df
 
-# -----------------------------
-# Plot Candlestick
-# -----------------------------
-def plot_candlestick(df, sma_window=20):
+def plot_candlestick(df, symbol):
+    df['Open'] = pd.to_numeric(df['Open'].str.replace(',',''), errors='coerce')
+    df['High'] = pd.to_numeric(df['High'].str.replace(',',''), errors='coerce')
+    df['Low'] = pd.to_numeric(df['Low'].str.replace(',',''), errors='coerce')
+    df['Close'] = pd.to_numeric(df['Close'].str.replace(',',''), errors='coerce')
+    df['Date'] = pd.date_range(end=pd.Timestamp.today(), periods=len(df))
+    
     fig = go.Figure(data=[go.Candlestick(
         x=df['Date'],
         open=df['Open'],
         high=df['High'],
         low=df['Low'],
         close=df['Close'],
-        name="Candlestick"
+        name=symbol
     )])
-    if f"SMA_{sma_window}" in df.columns:
+    if 'SMA' in df.columns:
         fig.add_trace(go.Scatter(
-            x=df['Date'], y=df[f"SMA_{sma_window}"],
-            mode='lines', name=f"SMA {sma_window}"
+            x=df['Date'],
+            y=df['SMA'],
+            mode='lines',
+            name='SMA'
         ))
     fig.update_layout(xaxis_rangeslider_visible=False)
     return fig
@@ -75,8 +70,8 @@ def plot_candlestick(df, sma_window=20):
 # Support & Resistance
 # -----------------------------
 def detect_levels(df):
-    if df.empty:
-        return {}
+    df['High'] = pd.to_numeric(df['High'].str.replace(',',''), errors='coerce')
+    df['Low'] = pd.to_numeric(df['Low'].str.replace(',',''), errors='coerce')
     levels = {
         "support": round(df['Low'].min(), 2),
         "resistance": round(df['High'].max(), 2)
@@ -84,19 +79,40 @@ def detect_levels(df):
     return levels
 
 # -----------------------------
+# Candlestick Image Analysis
+# -----------------------------
+def detect_patterns_from_image(image_bytes):
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=5, maxLineGap=3)
+    
+    if lines is None:
+        return {"trend": "Unable to detect", "support": None, "resistance": None, "patterns": []}
+    
+    ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
+         [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
+    support = int(np.percentile(ys, 90))
+    resistance = int(np.percentile(ys, 10))
+    trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
+    patterns = []
+    if len(lines) > 50:
+        patterns.append("Multiple candles detected (possible bullish/bearish)")
+    return {"trend": trend, "support": support, "resistance": resistance, "patterns": patterns}
+
+# -----------------------------
 # Streamlit Page
 # -----------------------------
 st.set_page_config(page_title="PSX Analysis App", layout="wide")
 st.title("📈 Pakistan Stock Market Analysis (PSX)")
 
-# -----------------------------
-# Tabs
-# -----------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Market Watch Table",
     "Search Symbol",
     "Candlestick Chart",
-    "Support & Resistance"
+    "Support & Resistance",
+    "Candlestick Image Analysis"
 ])
 
 # -----------------------------
@@ -115,9 +131,9 @@ with tab1:
 # -----------------------------
 with tab2:
     st.header("Search PSX Symbol")
-    symbol_search = st.text_input("Enter Symbol to search (e.g., MEBL, OGDC):")
+    symbol_search = st.text_input("Enter Symbol to search (e.g., MEBL, OGDC):", key="search")
     if symbol_search and not df_market.empty:
-        df_filtered = df_market[df_market.iloc[:, 0].str.upper() == symbol_search.upper()]
+        df_filtered = df_market[df_market.iloc[:,0].str.upper() == symbol_search.upper()]
         if df_filtered.empty:
             st.warning(f"No data found for {symbol_search.upper()}")
         else:
@@ -128,14 +144,14 @@ with tab2:
 # -----------------------------
 with tab3:
     st.header("Candlestick Chart with SMA")
-    symbol_chart = st.text_input("Enter PSX Symbol for chart:", key="chart_symbol")
-    if symbol_chart:
-        df_chart, error_chart = fetch_stock_data(symbol_chart.strip().upper())
-        if error_chart:
-            st.error(error_chart)
+    symbol_chart = st.text_input("Enter Symbol for chart:", key="chart")
+    if symbol_chart and not df_market.empty:
+        df_chart = df_market[df_market.iloc[:,0].str.upper() == symbol_chart.upper()]
+        if df_chart.empty:
+            st.error("No data found for symbol in Market Watch")
         else:
-            df_chart = compute_sma(df_chart, window=20)
-            fig = plot_candlestick(df_chart, sma_window=20)
+            df_chart = compute_sma(df_chart, window=5)
+            fig = plot_candlestick(df_chart, symbol_chart.upper())
             st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
@@ -143,11 +159,24 @@ with tab3:
 # -----------------------------
 with tab4:
     st.header("Support & Resistance Levels")
-    symbol_sr = st.text_input("Enter PSX Symbol for S/R:", key="sr_symbol")
-    if symbol_sr:
-        df_sr, error_sr = fetch_stock_data(symbol_sr.strip().upper())
-        if error_sr:
-            st.error(error_sr)
+    symbol_sr = st.text_input("Enter Symbol for S/R:", key="sr")
+    if symbol_sr and not df_market.empty:
+        df_sr = df_market[df_market.iloc[:,0].str.upper() == symbol_sr.upper()]
+        if df_sr.empty:
+            st.error("No data found for symbol in Market Watch")
         else:
             levels = detect_levels(df_sr)
             st.write(levels)
+
+# -----------------------------
+# Tab 5: Candlestick Image Analysis
+# -----------------------------
+with tab5:
+    st.header("Upload Candlestick Chart Image")
+    uploaded_file = st.file_uploader("Upload chart image (jpg/png)", type=["jpg","png"])
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Uploaded Chart", use_column_width=True)
+        results = detect_patterns_from_image(uploaded_file.read())
+        st.subheader("Analysis Results")
+        st.json(results)
