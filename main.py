@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from scrapers.dps_scraper import fetch_dps
 from scrapers.live_scraper import fetch_live_quote
 from analysis.indicators import compute_indicators
 from analysis.patterns import detect_chart_patterns
@@ -8,7 +7,6 @@ from analysis.support_resistance import detect_levels
 from ui.components import price_chart
 
 st.set_page_config(page_title="PSX Analysis App", layout="wide")
-
 st.title("📈 Pakistan Stock Market Analysis (PSX)")
 
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -19,12 +17,17 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ------------------------------
-# Daily Price Sheet
+# Daily Price Sheet (UPLOAD)
 # ------------------------------
 with tab1:
     st.header("Daily Price Sheet (PSX)")
-    dps = fetch_dps()
-    st.dataframe(dps)
+    file = st.file_uploader("Upload DPS CSV or Excel", type=["csv","xlsx"])
+    if file:
+        if file.name.endswith(".csv"):
+            dps = pd.read_csv(file)
+        else:
+            dps = pd.read_excel(file)
+        st.dataframe(dps)
 
 # ------------------------------
 # Live Market Data
@@ -52,14 +55,20 @@ with tab3:
 # Support & Resistance
 # ------------------------------
 with tab4:
-    st.header("Support/Resistance Levels (from DPS)")
-    dps = fetch_dps()
-    symbol = st.text_input("Symbol for S/R Detection", key="sr")
-    if symbol:
-        df = dps[dps["symbol"] == symbol.upper()]
-        if df.empty:
-            st.error("Symbol not found in DPS")
+    st.header("Support/Resistance Levels (from uploaded DPS)")
+    file = st.file_uploader("Upload DPS CSV/Excel for S/R detection", key="sr_file")
+    if file:
+        if file.name.endswith(".csv"):
+            dps = pd.read_csv(file)
         else:
-            df = df.sort_values("close", ascending=False).head(100)
-            levels = detect_levels(df)
-            st.write(levels)
+            dps = pd.read_excel(file)
+
+        symbol = st.text_input("Symbol for S/R Detection", key="sr_symbol")
+        if symbol:
+            df = dps[dps["symbol"] == symbol.upper()]
+            if df.empty:
+                st.error("Symbol not found in uploaded DPS")
+            else:
+                df = df.sort_values("close", ascending=False).head(100)
+                levels = detect_levels(df)
+                st.write(levels)
