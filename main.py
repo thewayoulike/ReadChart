@@ -26,6 +26,7 @@ def fetch_psx_market_watch():
             if cells:
                 rows.append(cells)
         df = pd.DataFrame(rows, columns=headers)
+        df = normalize_market_watch_columns(df)
         return df, None
     except Exception as e:
         return pd.DataFrame(), str(e)
@@ -52,18 +53,23 @@ def normalize_market_watch_columns(df):
     return df
 
 # -----------------------------
-# Candlestick & SMA from Market Watch
+# Candlestick & SMA
 # -----------------------------
 def compute_sma(df, window=5):
-    df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+    # Make sure Close exists
+    if 'Close' not in df.columns:
+        return df
+    df['Close'] = pd.to_numeric(df['Close'].str.replace(',',''), errors='coerce')
     df['SMA'] = df['Close'].rolling(window=window).mean()
     return df
 
 def plot_candlestick(df, symbol):
-    df['Open'] = pd.to_numeric(df['Open'], errors='coerce')
-    df['High'] = pd.to_numeric(df['High'], errors='coerce')
-    df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
-    df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+    for col in ['Open', 'High', 'Low', 'Close']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].str.replace(',',''), errors='coerce')
+        else:
+            df[col] = 0  # fallback if column missing
+
     df['Date'] = pd.date_range(end=pd.Timestamp.today(), periods=len(df))
     
     fig = go.Figure(data=[go.Candlestick(
@@ -85,13 +91,13 @@ def plot_candlestick(df, symbol):
     return fig
 
 # -----------------------------
-# Support & Resistance from numeric data
+# Support & Resistance
 # -----------------------------
 def detect_levels(df):
-    if 'High' not in df.columns or 'Low' not in df.columns:
-        return {"error": "Market Watch table missing 'High' or 'Low' columns"}
-    df['High'] = pd.to_numeric(df['High'], errors='coerce')
-    df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
+    for col in ['High', 'Low']:
+        if col not in df.columns:
+            return {"error": f"Missing {col} column"}
+        df[col] = pd.to_numeric(df[col].str.replace(',',''), errors='coerce')
     levels = {
         "support": round(df['Low'].min(), 2),
         "resistance": round(df['High'].max(), 2)
@@ -99,7 +105,7 @@ def detect_levels(df):
     return levels
 
 # -----------------------------
-# Candlestick Image Analysis (trend & patterns only)
+# Image Analysis (trend & patterns)
 # -----------------------------
 def detect_patterns_from_image(image_bytes):
     try:
@@ -146,8 +152,6 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.header("Full PSX Market Watch")
     df_market, error = fetch_psx_market_watch()
-    if not df_market.empty:
-        df_market = normalize_market_watch_columns(df_market)
     if error:
         st.error(error)
     else:
@@ -159,7 +163,7 @@ with tab1:
 with tab2:
     st.header("Search PSX Symbol")
     symbol_search = st.text_input("Enter Symbol to search (e.g., MEBL, OGDC):", key="search")
-    if symbol_search and not df_market.empty:
+    if symbol_search and not df_market.empty and 'Symbol' in df_market.columns:
         df_filtered = df_market[df_market['Symbol'].str.upper() == symbol_search.upper()]
         if df_filtered.empty:
             st.warning(f"No data found for {symbol_search.upper()}")
@@ -172,7 +176,7 @@ with tab2:
 with tab3:
     st.header("Candlestick Chart with SMA")
     symbol_chart = st.text_input("Enter Symbol for chart:", key="chart")
-    if symbol_chart and not df_market.empty:
+    if symbol_chart and not df_market.empty and 'Symbol' in df_market.columns:
         df_chart = df_market[df_market['Symbol'].str.upper() == symbol_chart.upper()]
         if df_chart.empty:
             st.error("No data found for symbol in Market Watch")
@@ -187,7 +191,7 @@ with tab3:
 with tab4:
     st.header("Support & Resistance Levels")
     symbol_sr = st.text_input("Enter Symbol for S/R:", key="sr")
-    if symbol_sr and not df_market.empty:
+    if symbol_sr and not df_market.empty and 'Symbol' in df_market.columns:
         df_sr = df_market[df_market['Symbol'].str.upper() == symbol_sr.upper()]
         if df_sr.empty:
             st.error("No data found for symbol in Market Watch")
@@ -202,12 +206,9 @@ with tab5:
     st.header("Upload Candlestick Chart Image")
     uploaded_file = st.file_uploader("Upload chart image (jpg/png)", type=["jpg","png"])
     if uploaded_file is not None:
-        # Keep original bytes
         file_bytes = uploaded_file.read()
-        # Show image without resizing
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Chart", use_column_width=False)
-        # Analyze trend/patterns
         results = detect_patterns_from_image(file_bytes)
         st.subheader("Analysis Results")
         st.json(results)
