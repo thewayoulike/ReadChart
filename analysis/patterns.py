@@ -4,6 +4,13 @@ from skimage.feature import canny
 from scipy.signal import find_peaks
 
 def detect_chart_patterns(img_bytes):
+    """
+    Advanced pattern detection using OpenCV + skimage
+    Detects:
+    - Head & Shoulders
+    - Double Top / Bottom
+    - Number of peaks and valleys
+    """
     np_img = np.frombuffer(img_bytes, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_GRAYSCALE)
 
