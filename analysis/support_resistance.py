@@ -1,6 +1,9 @@
 import numpy as np
 
 def detect_levels(df, max_levels=10):
+    """
+    Detect support and resistance levels from closing prices
+    """
     df = df.copy()
     prices = df["close"].values
     levels = []
@@ -11,6 +14,7 @@ def detect_levels(df, max_levels=10):
         if prices[i] == min(prices[i-2:i+3]):
             levels.append(("support", prices[i]))
 
+    # Remove levels that are too close
     unique = []
     for lvl_type, price in levels:
         if not any(abs(price - u[1]) < price * 0.005 for u in unique):
