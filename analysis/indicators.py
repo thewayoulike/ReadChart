@@ -2,6 +2,9 @@ import pandas as pd
 import ta
 
 def compute_indicators(df):
+    """
+    Compute technical indicators: RSI, EMA, MACD, Bollinger Bands
+    """
     df = df.copy()
     df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
     df["ema_20"] = ta.trend.EMAIndicator(df["close"], window=20).ema_indicator()
