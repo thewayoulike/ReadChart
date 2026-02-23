@@ -2,6 +2,9 @@ import streamlit as st
 import plotly.graph_objects as go
 
 def price_chart(df):
+    """
+    Plot candlestick chart using Plotly
+    """
     fig = go.Figure(data=[
         go.Candlestick(
             x=df.index,
