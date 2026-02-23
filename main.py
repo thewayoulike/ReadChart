@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from scrapers.psx_csv_fetcher import fetch_psx_data
 from scrapers.live_scraper import fetch_live_quote
 from analysis.indicators import compute_indicators
 from analysis.patterns import detect_chart_patterns
@@ -17,16 +18,19 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ------------------------------
-# Daily Price Sheet (UPLOAD)
+# Daily Price Sheet (AUTO FETCH)
 # ------------------------------
 with tab1:
     st.header("Daily Price Sheet (PSX)")
-    file = st.file_uploader("Upload DPS CSV or Excel", type=["csv","xlsx"])
-    if file:
-        if file.name.endswith(".csv"):
-            dps = pd.read_csv(file)
-        else:
-            dps = pd.read_excel(file)
+    symbols_input = st.text_input("Enter symbols separated by comma (default top 5):", 
+                                  value="MEBL,OGDC,UBL,ENGRO,HBL")
+    symbols = [s.strip().upper() for s in symbols_input.split(",")]
+
+    st.info("Fetching PSX data...")
+    dps = fetch_psx_data(symbols)
+    if dps.empty:
+        st.error("Failed to fetch PSX data. Check symbols or network.")
+    else:
         st.dataframe(dps)
 
 # ------------------------------
@@ -34,7 +38,7 @@ with tab1:
 # ------------------------------
 with tab2:
     st.header("Live PSX Quote")
-    symbol = st.text_input("Enter PSX Symbol (e.g., MEBL, OGDC, ENGRO)")
+    symbol = st.text_input("Enter PSX Symbol (e.g., MEBL, OGDC, ENGRO)", key="live_symbol")
     if symbol:
         quote = fetch_live_quote(symbol.upper())
         st.json(quote)
@@ -55,20 +59,13 @@ with tab3:
 # Support & Resistance
 # ------------------------------
 with tab4:
-    st.header("Support/Resistance Levels (from uploaded DPS)")
-    file = st.file_uploader("Upload DPS CSV/Excel for S/R detection", key="sr_file")
-    if file:
-        if file.name.endswith(".csv"):
-            dps = pd.read_csv(file)
+    st.header("Support/Resistance Levels (Auto PSX Data)")
+    symbol = st.text_input("Symbol for S/R Detection", key="sr_symbol")
+    if symbol:
+        df = dps[dps["symbol"] == symbol.upper()]
+        if df.empty:
+            st.error("Symbol not found in fetched data")
         else:
-            dps = pd.read_excel(file)
-
-        symbol = st.text_input("Symbol for S/R Detection", key="sr_symbol")
-        if symbol:
-            df = dps[dps["symbol"] == symbol.upper()]
-            if df.empty:
-                st.error("Symbol not found in uploaded DPS")
-            else:
-                df = df.sort_values("close", ascending=False).head(100)
-                levels = detect_levels(df)
-                st.write(levels)
+            df = df.sort_values("close", ascending=False).head(100)
+            levels = detect_levels(df)
+            st.write(levels)
