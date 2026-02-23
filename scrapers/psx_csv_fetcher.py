@@ -1,35 +1,26 @@
-import datetime
+import requests
 import pandas as pd
-from psx_feed import stocks
 
-def fetch_psx_data(symbols=None, start_date=None, end_date=None):
+def fetch_psxterminal(symbol: str = None):
     """
-    Fetch PSX data automatically and return as DataFrame
-    symbols: list of PSX symbols (default top 5)
-    start_date: datetime.date object (default: 2025-01-01)
-    end_date: datetime.date object (default: today)
+    Fetch PSX data from psxterminal.com API.
+    If symbol is None, returns market data for all symbols.
     """
-    if symbols is None:
-        symbols = ["MEBL", "OGDC", "UBL", "ENGRO", "HBL"]
+    base = "https://psxterminal.com/api/market-data"
+    params = {}
 
-    if start_date is None:
-        start_date = datetime.date(2025, 1, 1)
-    if end_date is None:
-        end_date = datetime.date.today()
+    if symbol:
+        params["symbol"] = symbol.upper()
 
-    all_data = []
-    for s in symbols:
-        try:
-            df = stocks(s, start=start_date, end=end_date)
-            df["symbol"] = s
-            all_data.append(df)
-        except Exception as e:
-            print(f"Failed to fetch {s}: {e}")
+    try:
+        r = requests.get(base, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        return pd.DataFrame(), f"Error: {e}"
 
-    if all_data:
-        df_all = pd.concat(all_data)
-        df_all.reset_index(inplace=True)
-        df_all.rename(columns={"index": "date"}, inplace=True)
-        return df_all
-    else:
-        return pd.DataFrame()
+    # If symbol specified, wrap in list
+    items = data if isinstance(data, list) else [data]
+    df = pd.DataFrame(items)
+
+    return df, None
