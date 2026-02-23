@@ -1,11 +1,25 @@
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 
 def fetch_live_quote(symbol: str):
+    """
+    Fetch live PSX quote for a given symbol.
+    Returns dictionary: last_price, change, volume.
+    """
     url = f"https://www.psx.com.pk/market-summary/company/{symbol}"
 
-    r = requests.get(url, timeout=10)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/112.0.0.0 Safari/537.36"
+    }
+
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+    except Exception as e:
+        return {"error": f"Failed to fetch data: {e}"}
+
     soup = BeautifulSoup(r.text, "lxml")
 
     def extract(label):
@@ -15,7 +29,7 @@ def fetch_live_quote(symbol: str):
         return None
 
     return {
-        "symbol": symbol,
+        "symbol": symbol.upper(),
         "last_price": extract("Current Price"),
         "change": extract("Change"),
         "volume": extract("Total Volume"),
