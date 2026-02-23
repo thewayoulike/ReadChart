@@ -1,0 +1,12 @@
+streamlit
+pandas
+numpy
+requests
+beautifulsoup4
+lxml
+plotly
+opencv-python-headless
+scikit-image
+scipy
+matplotlib
+ta
