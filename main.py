@@ -3,8 +3,8 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from PIL import Image
-import cv2
 import numpy as np
+import cv2
 import plotly.graph_objects as go
 
 # -----------------------------
@@ -79,27 +79,35 @@ def detect_levels(df):
     return levels
 
 # -----------------------------
-# Candlestick Image Analysis
+# Candlestick Image Analysis (Fixed for Streamlit Cloud)
 # -----------------------------
-def detect_patterns_from_image(image_bytes):
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=5, maxLineGap=3)
-    
-    if lines is None:
-        return {"trend": "Unable to detect", "support": None, "resistance": None, "patterns": []}
-    
-    ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
-         [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
-    support = int(np.percentile(ys, 90))
-    resistance = int(np.percentile(ys, 10))
-    trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
-    patterns = []
-    if len(lines) > 50:
-        patterns.append("Multiple candles detected (possible bullish/bearish)")
-    return {"trend": trend, "support": support, "resistance": resistance, "patterns": patterns}
+def detect_patterns_from_image(uploaded_file):
+    try:
+        # Load with PIL and convert to numpy
+        image = Image.open(uploaded_file).convert("RGB")
+        img = np.array(image)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # Convert to BGR for OpenCV
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=5, maxLineGap=3)
+
+        if lines is None:
+            return {"trend": "Unable to detect", "support": None, "resistance": None, "patterns": []}
+
+        ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
+             [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
+        support = int(np.percentile(ys, 90))
+        resistance = int(np.percentile(ys, 10))
+        trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
+        patterns = []
+        if len(lines) > 50:
+            patterns.append("Multiple candles detected (possible bullish/bearish)")
+
+        return {"trend": trend, "support": support, "resistance": resistance, "patterns": patterns}
+
+    except Exception as e:
+        return {"error": str(e)}
 
 # -----------------------------
 # Streamlit Page
@@ -177,6 +185,6 @@ with tab5:
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Chart", use_column_width=True)
-        results = detect_patterns_from_image(uploaded_file.read())
+        results = detect_patterns_from_image(uploaded_file)  # <- fixed
         st.subheader("Analysis Results")
         st.json(results)
