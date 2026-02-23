@@ -35,7 +35,7 @@ def fetch_psx_market_watch():
 # Normalize Column Names
 # -----------------------------
 def normalize_market_watch_columns(df):
-    df = df.rename(columns=lambda x: x.strip())  # remove extra spaces
+    df = df.rename(columns=lambda x: x.strip())
     col_map = {}
     for col in df.columns:
         col_lower = col.lower()
@@ -56,7 +56,6 @@ def normalize_market_watch_columns(df):
 # Candlestick & SMA
 # -----------------------------
 def compute_sma(df, window=5):
-    # Make sure Close exists
     if 'Close' not in df.columns:
         return df
     df['Close'] = pd.to_numeric(df['Close'].str.replace(',',''), errors='coerce')
@@ -68,10 +67,8 @@ def plot_candlestick(df, symbol):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col].str.replace(',',''), errors='coerce')
         else:
-            df[col] = 0  # fallback if column missing
-
+            df[col] = 0
     df['Date'] = pd.date_range(end=pd.Timestamp.today(), periods=len(df))
-    
     fig = go.Figure(data=[go.Candlestick(
         x=df['Date'],
         open=df['Open'],
@@ -91,7 +88,7 @@ def plot_candlestick(df, symbol):
     return fig
 
 # -----------------------------
-# Support & Resistance
+# Support & Resistance (numeric)
 # -----------------------------
 def detect_levels(df):
     for col in ['High', 'Low']:
@@ -105,10 +102,11 @@ def detect_levels(df):
     return levels
 
 # -----------------------------
-# Image Analysis (trend & patterns)
+# Candlestick Image Analysis
 # -----------------------------
 def detect_patterns_from_image(image_bytes):
     try:
+        # Load image from bytes
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
@@ -116,24 +114,41 @@ def detect_patterns_from_image(image_bytes):
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
+
+        # Trend detection
         lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=5, maxLineGap=3)
-
         if lines is None:
-            return {"trend": "Unable to detect", "patterns": []}
+            trend = "Unable to detect"
+        else:
+            ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
+                 [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
+            trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
 
-        ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
-             [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
-        trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
+        # Candle pattern detection
         patterns = []
-        if len(lines) > 50:
+        if lines is not None and len(lines) > 50:
             patterns.append("Multiple candles detected (possible bullish/bearish)")
 
-        return {"trend": trend, "patterns": patterns}
+        # Support & Resistance estimation
+        vertical_sum = np.sum(edges, axis=1)
+        threshold = max(vertical_sum) * 0.5 if len(vertical_sum) > 0 else 0
+        support_y = np.where(vertical_sum > threshold)[0]
+        resistance_y = np.where(vertical_sum > threshold)[0]
+
+        support = int(np.median(support_y)) if len(support_y) > 0 else None
+        resistance = int(np.median(resistance_y)) if len(resistance_y) > 0 else None
+
+        return {
+            "trend": trend,
+            "patterns": patterns,
+            "support": support,
+            "resistance": resistance
+        }
     except Exception as e:
         return {"error": str(e)}
 
 # -----------------------------
-# Streamlit Page
+# Streamlit App
 # -----------------------------
 st.set_page_config(page_title="PSX Analysis App", layout="wide")
 st.title("📈 Pakistan Stock Market Analysis (PSX)")
@@ -146,9 +161,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Candlestick Image Analysis"
 ])
 
-# -----------------------------
 # Tab 1: Full Market Watch
-# -----------------------------
 with tab1:
     st.header("Full PSX Market Watch")
     df_market, error = fetch_psx_market_watch()
@@ -157,9 +170,7 @@ with tab1:
     else:
         st.dataframe(df_market)
 
-# -----------------------------
 # Tab 2: Search Symbol
-# -----------------------------
 with tab2:
     st.header("Search PSX Symbol")
     symbol_search = st.text_input("Enter Symbol to search (e.g., MEBL, OGDC):", key="search")
@@ -170,9 +181,7 @@ with tab2:
         else:
             st.dataframe(df_filtered)
 
-# -----------------------------
 # Tab 3: Candlestick Chart
-# -----------------------------
 with tab3:
     st.header("Candlestick Chart with SMA")
     symbol_chart = st.text_input("Enter Symbol for chart:", key="chart")
@@ -185,9 +194,7 @@ with tab3:
             fig = plot_candlestick(df_chart, symbol_chart.upper())
             st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------
 # Tab 4: Support & Resistance
-# -----------------------------
 with tab4:
     st.header("Support & Resistance Levels")
     symbol_sr = st.text_input("Enter Symbol for S/R:", key="sr")
@@ -199,9 +206,7 @@ with tab4:
             levels = detect_levels(df_sr)
             st.write(levels)
 
-# -----------------------------
 # Tab 5: Candlestick Image Analysis
-# -----------------------------
 with tab5:
     st.header("Upload Candlestick Chart Image")
     uploaded_file = st.file_uploader("Upload chart image (jpg/png)", type=["jpg","png"])
