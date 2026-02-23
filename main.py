@@ -16,18 +16,15 @@ def fetch_psx_market_watch():
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
-        
         table = soup.find("table")
         if not table:
             return pd.DataFrame(), "No table found on the page"
-        
         headers = [th.text.strip() for th in table.find_all("th")]
         rows = []
         for tr in table.find_all("tr")[1:]:
             cells = [td.text.strip() for td in tr.find_all("td")]
             if cells:
                 rows.append(cells)
-        
         df = pd.DataFrame(rows, columns=headers)
         return df, None
     except Exception as e:
@@ -67,7 +64,7 @@ def plot_candlestick(df, symbol):
     return fig
 
 # -----------------------------
-# Support & Resistance
+# Support & Resistance from numeric data
 # -----------------------------
 def detect_levels(df):
     df['High'] = pd.to_numeric(df['High'].str.replace(',',''), errors='coerce')
@@ -79,33 +76,31 @@ def detect_levels(df):
     return levels
 
 # -----------------------------
-# Candlestick Image Analysis (Fixed for Streamlit Cloud)
+# Candlestick Image Analysis (trend & patterns only)
 # -----------------------------
-def detect_patterns_from_image(uploaded_file):
+def detect_patterns_from_image(image_bytes):
     try:
-        # Load with PIL and convert to numpy
-        image = Image.open(uploaded_file).convert("RGB")
-        img = np.array(image)
-        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # Convert to BGR for OpenCV
+        # Load image from bytes without resizing
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return {"error": "Cannot decode image. Make sure it is a valid PNG/JPG."}
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
         lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=5, maxLineGap=3)
 
         if lines is None:
-            return {"trend": "Unable to detect", "support": None, "resistance": None, "patterns": []}
+            return {"trend": "Unable to detect", "patterns": []}
 
         ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
              [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
-        support = int(np.percentile(ys, 90))
-        resistance = int(np.percentile(ys, 10))
         trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
         patterns = []
         if len(lines) > 50:
             patterns.append("Multiple candles detected (possible bullish/bearish)")
 
-        return {"trend": trend, "support": support, "resistance": resistance, "patterns": patterns}
-
+        return {"trend": trend, "patterns": patterns}
     except Exception as e:
         return {"error": str(e)}
 
@@ -183,8 +178,12 @@ with tab5:
     st.header("Upload Candlestick Chart Image")
     uploaded_file = st.file_uploader("Upload chart image (jpg/png)", type=["jpg","png"])
     if uploaded_file is not None:
+        # Keep original bytes
+        file_bytes = uploaded_file.read()
+        # Show image without resizing
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Chart", use_column_width=True)
-        results = detect_patterns_from_image(uploaded_file)  # <- fixed
+        st.image(image, caption="Uploaded Chart", use_column_width=False)
+        # Analyze trend/patterns
+        results = detect_patterns_from_image(file_bytes)
         st.subheader("Analysis Results")
         st.json(results)
