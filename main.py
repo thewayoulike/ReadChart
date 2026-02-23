@@ -104,48 +104,70 @@ def detect_levels(df):
 # -----------------------------
 # Candlestick Image Analysis
 # -----------------------------
-def detect_patterns_from_image(image_bytes):
+def analyze_chart_image(image_bytes, min_price, max_price):
     try:
-        # Load image from bytes
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
-            return {"error": "Cannot decode image. Make sure it is a valid PNG/JPG."}
+            return {"error": "Cannot decode image."}, None
 
+        img_height, img_width = img.shape[:2]
+
+        # Convert to grayscale & detect edges
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
 
-        # Trend detection
+        # Trend detection using Hough Lines
         lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=5, maxLineGap=3)
-        if lines is None:
-            trend = "Unable to detect"
-        else:
+        if lines is not None:
             ys = [y1 for line in lines for x1, y1, x2, y2 in [line[0]]] + \
                  [y2 for line in lines for x1, y1, x2, y2 in [line[0]]]
             trend = "Uptrend" if ys[-1] < ys[0] else "Downtrend" if ys[-1] > ys[0] else "Sideways"
+        else:
+            trend = "Unable to detect"
 
-        # Candle pattern detection
+        # Detect patterns
         patterns = []
         if lines is not None and len(lines) > 50:
             patterns.append("Multiple candles detected (possible bullish/bearish)")
 
-        # Support & Resistance estimation
+        # Support & Resistance detection
         vertical_sum = np.sum(edges, axis=1)
         threshold = max(vertical_sum) * 0.5 if len(vertical_sum) > 0 else 0
-        support_y = np.where(vertical_sum > threshold)[0]
-        resistance_y = np.where(vertical_sum > threshold)[0]
+        sr_pixels = np.where(vertical_sum > threshold)[0]
 
-        support = int(np.median(support_y)) if len(support_y) > 0 else None
-        resistance = int(np.median(resistance_y)) if len(resistance_y) > 0 else None
+        if len(sr_pixels) > 0:
+            support_pixel = int(np.median(sr_pixels))
+            resistance_pixel = int(np.median(sr_pixels))
+            # Convert pixel to price
+            support_price = min_price + (img_height - support_pixel) * (max_price - min_price) / img_height
+            resistance_price = min_price + (img_height - resistance_pixel) * (max_price - min_price) / img_height
+            support_price = round(support_price, 2)
+            resistance_price = round(resistance_price, 2)
+        else:
+            support_price = None
+            resistance_price = None
+            support_pixel = resistance_pixel = None
 
-        return {
+        # Draw support & resistance lines on image
+        if support_pixel is not None:
+            cv2.line(img, (0, support_pixel), (img_width, support_pixel), (0,255,0), 2)  # green
+            cv2.putText(img, f"S: {support_price}", (10, support_pixel-5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+        if resistance_pixel is not None:
+            cv2.line(img, (0, resistance_pixel), (img_width, resistance_pixel), (0,0,255), 2)  # red
+            cv2.putText(img, f"R: {resistance_price}", (10, resistance_pixel-5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,255), 2)
+
+        result = {
             "trend": trend,
             "patterns": patterns,
-            "support": support,
-            "resistance": resistance
+            "support": support_price,
+            "resistance": resistance_price
         }
+
+        return result, img
+
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": str(e)}, None
 
 # -----------------------------
 # Streamlit App
@@ -210,10 +232,16 @@ with tab4:
 with tab5:
     st.header("Upload Candlestick Chart Image")
     uploaded_file = st.file_uploader("Upload chart image (jpg/png)", type=["jpg","png"])
-    if uploaded_file is not None:
+    min_price = st.number_input("Enter Minimum Price (bottom of chart)", value=0.0, step=0.01)
+    max_price = st.number_input("Enter Maximum Price (top of chart)", value=100.0, step=0.01)
+
+    if uploaded_file is not None and max_price > min_price:
         file_bytes = uploaded_file.read()
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Chart", use_column_width=False)
-        results = detect_patterns_from_image(file_bytes)
+        results, img_with_lines = analyze_chart_image(file_bytes, min_price, max_price)
+
         st.subheader("Analysis Results")
         st.json(results)
+
+        if img_with_lines is not None:
+            st.subheader("Chart with Support & Resistance Lines")
+            st.image(Image.fromarray(img_with_lines), use_column_width=True)
