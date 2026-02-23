@@ -1,5 +1,6 @@
 streamlit
 pandas
+yfinance
 numpy
 requests
 beautifulsoup4
